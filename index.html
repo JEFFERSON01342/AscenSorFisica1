@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Simulador de Ascensor Manual (HTML)</title>
+  <style>
+    :root{--card:#fff;--muted:#666;--accent:#1160d8}
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:0;background:#f3f4f6;color:#111}
+    .container{max-width:1100px;margin:28px auto;padding:20px}
+    .grid{display:grid;grid-template-columns:1fr 420px 360px;gap:18px}
+    .card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(17,24,39,0.06)}
+    label{font-size:12px;color:var(--muted);display:block;margin-top:10px}
+    input[type=number],select{width:100%;padding:8px;border-radius:8px;border:1px solid #d1d5db}
+    button{padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:white;cursor:pointer}
+    button.secondary{background:#efefef;color:#111}
+    .small{font-size:13px;color:var(--muted)}
+    .results{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+    .result{background:#fbfbfb;padding:8px;border-radius:8px;font-family:monospace}
+    .svgwrap{background:linear-gradient(180deg,#fff,#f8fafc);display:flex;align-items:center;justify-content:center;padding:12px;border-radius:8px}
+    footer{margin-top:18px;color:var(--muted);font-size:13px}
+    @media (max-width:1000px){.grid{grid-template-columns:1fr;}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 style="margin:0 0 8px 0">Simulador de Ascensor Manual — HTML</h1>
+    <p class="small">Versión sin dependencias. Ajusta parámetros y pulsa <strong>Simular</strong>. La simulación asume aceleración constante desde reposo durante t segundos.</p>
+
+    <div class="grid">
+      <!-- Controls -->
+      <div class="card">
+        <h3 style="margin:0 0 6px 0">Parámetros</h3>
+        <label>Masa m (kg)</label>
+        <input id="m" type="number" value="200" step="1" />
+
+        <label>Número de ramales n</label>
+        <input id="n" type="number" value="2" min="1" step="1" />
+
+        <label>Radio tambor r (m)</label>
+        <input id="r" type="number" value="0.2" step="0.01" />
+
+        <label>Radio manivela L_h (m)</label>
+        <input id="Lh" type="number" value="0.5" step="0.01" />
+
+        <label>Momento de inercia I (kg·m²)</label>
+        <input id="I" type="number" value="5" step="0.1" />
+
+        <label>Gravedad g (m/s²)</label>
+        <input id="g" type="number" value="9.8" step="0.01" />
+
+        <label>Aceleración de la cabina a (m/s²)</label>
+        <input id="a" type="number" value="0.5" step="0.01" />
+
+        <label>Tiempo de aceleración t (s)</label>
+        <input id="tSim" type="number" value="2" step="0.1" />
+
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <button id="btnSim">Simular</button>
+          <button id="btnReset" class="secondary">Reset</button>
+        </div>
+
+        <div class="small" style="margin-top:10px">Nota: Si a = 0 se calculará el caso estático (reposo).</div>
+      </div>
+
+      <!-- Visual -->
+      <div class="card svgwrap" style="flex-direction:column">
+        <h3 style="margin:0 0 8px 0">Vista</h3>
+        <svg id="scene" width="380" height="320" viewBox="0 0 420 320" style="background:transparent;border-radius:8px"></svg>
+        <div class="small" id="tNow" style="margin-top:8px">Tiempo: 0.00 s</div>
+      </div>
+
+      <!-- Results -->
+      <div class="card">
+        <h3 style="margin:0 0 8px 0">Resultados</h3>
+        <div class="results" id="resultsGrid">
+          <!-- results populated by JS -->
+        </div>
+        <div style="margin-top:10px" class="small">Comparación: W_in debe ser igual a (K_cab + K_tamb + ΔU) si no hay pérdidas.</div>
+      </div>
+    </div>
+
+    <footer>Consejo: prueba con n mayor para ver cómo disminuye la fuerza humana requerida.</footer>
+  </div>
+
+  <script>
+    // --- Helper: lectura segura de parámetros ---
+    function val(id){const el=document.getElementById(id);return parseFloat(el.value)||0}
+
+    // --- Computation function (same formulas que antes) ---
+    function computeAll({m,n,r,Lh,I,g,a,t}){
+      const T1_static = (m * g) / n;
+      const tau_static = T1_static * r;
+      const Fh_static = tau_static / Lh;
+
+      const T1_dyn = (m * g + m * a) / n;
+      const alpha = (n * a) / r; // a = r*α/n => α = n a / r
+      const tau_dyn = I * alpha + T1_dyn * r;
+      const Fh_dyn = tau_dyn / Lh;
+
+      const v_after = a * t;
+      const omega_after = (v_after * n) / r;
+      const dh = 0.5 * a * t * t;
+      const s_cuerda = n * dh;
+
+      const K_cab = 0.5 * m * v_after * v_after;
+      const K_tamb = 0.5 * I * omega_after * omega_after;
+      const U = m * g * dh;
+
+      const theta = 0.5 * alpha * t * t;
+      const W_in = tau_dyn * theta;
+      const W_out = U;
+
+      return {T1_static,tau_static,Fh_static,T1_dyn,alpha,tau_dyn,Fh_dyn,v_after,omega_after,dh,s_cuerda,K_cab,K_tamb,U,theta,W_in,W_out};
+    }
+
+    // --- SVG drawing & animation ---
+    const svg = document.getElementById('scene');
+    const svgW = 420, svgH = 320;
+    const pulleyX = 80, pulleyY = 60;
+    const cabinWidth=80, cabinHeight=60;
+    const cabinYBase = 220; // pixel where h=0
+    const scale=60; // px per meter
+
+    function clearSVG(){while(svg.firstChild) svg.removeChild(svg.firstChild)}
+
+    function drawStatic(n, dh_now, results){
+      clearSVG();
+      // soporte
+      const ns = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      ns.setAttribute('x',pulleyX-8);ns.setAttribute('y',pulleyY-16);ns.setAttribute('width',16);ns.setAttribute('height',32);ns.setAttribute('rx',3);ns.setAttribute('fill','#333');svg.appendChild(ns);
+      // polea
+      const c = document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('cx',pulleyX);c.setAttribute('cy',pulleyY);c.setAttribute('r',20);c.setAttribute('stroke','#444');c.setAttribute('stroke-width',4);c.setAttribute('fill','#eee');svg.appendChild(c);
+
+      // cables
+      for(let i=0;i<n;i++){
+        const offset = (i - (n-1)/2)*8;
+        const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+        line.setAttribute('x1',pulleyX+offset);line.setAttribute('y1',pulleyY+20);
+        const cabinYPixel = cabinYBase - dh_now*scale;
+        line.setAttribute('x2',pulleyX+offset);line.setAttribute('y2',cabinYPixel);
+        line.setAttribute('stroke','#222');line.setAttribute('stroke-width',2);svg.appendChild(line);
+      }
+
+      // cabina
+      const cabinYPixel = cabinYBase - dh_now*scale;
+      const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+      rect.setAttribute('x',pulleyX - cabinWidth/2);rect.setAttribute('y',cabinYPixel - cabinHeight/2);
+      rect.setAttribute('width',cabinWidth);rect.setAttribute('height',cabinHeight);rect.setAttribute('rx',6);rect.setAttribute('fill','#f3f4f6');rect.setAttribute('stroke','#111');svg.appendChild(rect);
+      const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+      txt.setAttribute('x',pulleyX);txt.setAttribute('y',cabinYPixel);txt.setAttribute('text-anchor','middle');txt.setAttribute('dominant-baseline','middle');txt.setAttribute('font-size',12);txt.textContent='Cabina';svg.appendChild(txt);
+
+      // ground line
+      const gline = document.createElementNS('http://www.w3.org/2000/svg','line');gline.setAttribute('x1',0);gline.setAttribute('y1',cabinYBase + cabinHeight/2 +8);gline.setAttribute('x2',svgW);gline.setAttribute('y2',cabinYBase + cabinHeight/2 +8);gline.setAttribute('stroke','#999');gline.setAttribute('stroke-dasharray','4 4');svg.appendChild(gline);
+
+      // overlay numbers
+      const overlay = document.createElementNS('http://www.w3.org/2000/svg','g');
+      const values=[`v=${results.v_after.toFixed(3)} m/s`, `ω=${results.omega_after.toFixed(3)} rad/s`, `Δh=${results.dh.toFixed(3)} m`];
+      values.forEach((s,i)=>{
+        const t = document.createElementNS('http://www.w3.org/2000/svg','text');t.setAttribute('x',220);t.setAttribute('y',40+20*i);t.setAttribute('font-size',13);t.textContent=s;overlay.appendChild(t);
+      });svg.appendChild(overlay);
+    }
+
+    // Animation control
+    let raf=null; let startTS=null; let running=false; let simParams=null; let simResults=null;
+
+    function startSim(){
+      // read inputs
+      const params = {m:val('m'), n:Math.max(1,Math.floor(val('n'))), r:val('r'), Lh:val('Lh'), I:val('I'), g:val('g'), a:val('a'), t:val('tSim')};
+      simParams=params; simResults=computeAll(params);
+      running=true; startTS=null; document.getElementById('tNow').textContent='Tiempo: 0.00 s';
+      cancelAnimationFrame(raf);
+      raf=requestAnimationFrame(step);
+    }
+
+    function resetSim(){ running=false; cancelAnimationFrame(raf); startTS=null; document.getElementById('tNow').textContent='Tiempo: 0.00 s'; simParams=null; simResults=null; drawStatic(parseInt(document.getElementById('n').value||2), 0, computeAll({m:val('m'),n:Math.max(1,Math.floor(val('n'))),r:val('r'),Lh:val('Lh'),I:val('I'),g:val('g'),a:val('a'),t:val('tSim')})); renderResults(computeAll({m:val('m'),n:Math.max(1,Math.floor(val('n'))),r:val('r'),Lh:val('Lh'),I:val('I'),g:val('g'),a:val('a'),t:val('tSim')})); }
+
+    function step(ts){
+      if(!startTS) startTS=ts; const elapsed=(ts-startTS)/1000; const t=paramsOr(simParams,()=>0).t;
+      const tNow = Math.min(elapsed, simParams.t);
+      document.getElementById('tNow').textContent = 'Tiempo: ' + tNow.toFixed(2) + ' s';
+      const dh_now = 0.5 * simParams.a * tNow * tNow; drawStatic(simParams.n, dh_now, simResults);
+      if(elapsed < simParams.t) raf=requestAnimationFrame(step); else { running=false; cancelAnimationFrame(raf); renderResults(simResults); }
+    }
+
+    function paramsOr(p,fn){return p||fn()}
+
+    // initial draw
+    drawStatic(parseInt(document.getElementById('n').value||2), 0, computeAll({m:val('m'),n:Math.max(1,Math.floor(val('n'))),r:val('r'),Lh:val('Lh'),I:val('I'),g:val('g'),a:val('a'),t:val('tSim')}));
+
+    // render results to resultsGrid
+    function renderResults(results){
+      const grid=document.getElementById('resultsGrid');grid.innerHTML='';
+      const pairs=[
+        ['Tensión (estática) T₁', results.T1_static.toFixed(2)+' N'],
+        ['Torque (estático) τ', results.tau_static.toFixed(2)+' N·m'],
+        ['Fuerza humana (estática) F_h', results.Fh_static.toFixed(2)+' N'],
+        ['Tensión (dinámica) T₁', results.T1_dyn.toFixed(2)+' N'],
+        ['Torque (dinámico) τ', results.tau_dyn.toFixed(2)+' N·m'],
+        ['Fuerza humana (dinámica) F_h', results.Fh_dyn.toFixed(2)+' N'],
+        ['Velocidad final v', results.v_after.toFixed(3)+' m/s'],
+        ['Velocidad angular ω', results.omega_after.toFixed(3)+' rad/s'],
+        ['Energía cinética (cabina)', results.K_cab.toFixed(2)+' J'],
+        ['Energía cinética (tambor)', results.K_tamb.toFixed(2)+' J'],
+        ['Energía potencial ganada', results.U.toFixed(2)+' J'],
+        ['Trabajo manivela W_in', results.W_in.toFixed(2)+' J'],
+        ['Trabajo útil W_out (ΔU)', results.W_out.toFixed(2)+' J'],
+      ];
+      for(const [k,v] of pairs){
+        const d=document.createElement('div');d.className='result';d.innerHTML=`<div style="font-size:12px;color:#666">${k}</div><div style="margin-top:6px">${v}</div>`;grid.appendChild(d);
+      }
+
+      // add energy check
+      const check=document.createElement('div');check.className='result';check.style.gridColumn='1 / -1';check.innerHTML=`<div style="font-size:12px;color:#666">Comprobación (W_in ?= K+U)</div><div style="margin-top:6px">W_in = ${results.W_in.toFixed(2)} J • (K+U) = ${(results.K_cab + results.K_tamb + results.U).toFixed(2)} J</div>`;grid.appendChild(check);
+    }
+
+    // wire buttons
+    document.getElementById('btnSim').addEventListener('click', ()=>{ if(running) return; startSim(); });
+    document.getElementById('btnReset').addEventListener('click', ()=>{ resetSim(); });
+
+    // compute initial results
+    renderResults(computeAll({m:val('m'),n:Math.max(1,Math.floor(val('n'))),r:val('r'),Lh:val('Lh'),I:val('I'),g:val('g'),a:val('a'),t:val('tSim')}));
+
+    // update results live when inputs change
+    const inputs = ['m','n','r','Lh','I','g','a','tSim'];
+    inputs.forEach(id=>document.getElementById(id).addEventListener('input', ()=>{
+      if(running) return; renderResults(computeAll({m:val('m'),n:Math.max(1,Math.floor(val('n'))),r:val('r'),Lh:val('Lh'),I:val('I'),g:val('g'),a:val('a'),t:val('tSim')}));
+      drawStatic(Math.max(1,Math.floor(val('n'))), 0, computeAll({m:val('m'),n:Math.max(1,Math.floor(val('n'))),r:val('r'),Lh:val('Lh'),I:val('I'),g:val('g'),a:val('a'),t:val('tSim')}));
+    }));
+
+  </script>
+</body>
+</html>
