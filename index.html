@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Simulador de Ascensor Manual — Mejorado</title>
+  <title>Simulador de Ascensor Manual — Avanzado (fricción, gráficos, anim)</title>
   <style>
     :root{--card:#fff;--muted:#666;--accent:#0b63d6}
     body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:0;background:#f3f4f6;color:#111}
-    .container{max-width:1100px;margin:22px auto;padding:18px}
-    .grid{display:grid;grid-template-columns:1fr 460px 380px;gap:16px}
+    .container{max-width:1200px;margin:20px auto;padding:18px}
+    .grid{display:grid;grid-template-columns:1fr 520px 360px;gap:16px}
     .card{background:var(--card);padding:12px;border-radius:12px;box-shadow:0 6px 18px rgba(17,24,39,0.06)}
     label{font-size:12px;color:var(--muted);display:block;margin-top:10px}
     input[type=number],select{width:100%;padding:8px;border-radius:8px;border:1px solid #d1d5db}
@@ -18,15 +18,15 @@
     .results{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px}
     .result{background:#fbfbfb;padding:8px;border-radius:8px;font-family:monospace}
     .svgwrap{background:linear-gradient(180deg,#fff,#f8fafc);display:flex;align-items:center;justify-content:center;padding:12px;border-radius:8px}
+    .graph{background:#fff;border-radius:8px;padding:8px;margin-top:8px}
     footer{margin-top:14px;color:var(--muted);font-size:13px}
-    .note{font-size:13px;color:#444}
     @media (max-width:1100px){.grid{grid-template-columns:1fr}} 
   </style>
 </head>
 <body>
   <div class="container">
-    <h1 style="margin:0 0 6px 0">Simulador de Ascensor Manual — Mejorado</h1>
-    <p class="small">Versión mejorada: fórmulas revisadas y visualización ampliada (dadle <strong>Simular</strong>).</p>
+    <h1 style="margin:0 0 6px 0">Simulador de Ascensor Manual — Avanzado</h1>
+    <p class="small">Incluye: fricción constante (τ_f), gráficos en tiempo real (energía y altura) y animación mejorada (cuerda enrollándose, poleas).</p>
 
     <div class="grid">
       <!-- Controls -->
@@ -50,27 +50,36 @@
         <label>Gravedad g (m/s²)</label>
         <input id="g" type="number" value="9.8" step="0.01" />
 
-        <label>Aceleración de la cabina a (m/s²) (positiva hacia arriba)</label>
+        <label>Aceleración deseada de la cabina a (m/s²) (positiva hacia arriba)</label>
         <input id="a" type="number" value="0.5" step="0.01" />
 
         <label>Tiempo de aceleración t (s)</label>
         <input id="tSim" type="number" value="2" step="0.1" />
 
+        <label>Torque de fricción (τ_f) constante (N·m) — opción A</label>
+        <input id="tau_f" type="number" value="10" step="0.1" />
+
         <div style="margin-top:12px;display:flex;gap:8px">
           <button id="btnSim">Simular</button>
+          <button id="btnPause" class="secondary">Pausa</button>
           <button id="btnReset" class="secondary">Reset</button>
         </div>
 
-        <div class="small" style="margin-top:10px">Notas: (1) La relación entre velocidad lineal de la cabina y velocidad angular del tambor es <strong>v = r·ω / n</strong>. (2) La masa equivalente debida al tambor es <strong>m<sub>eq, tambor</sub> = I·n² / r²</strong>.</div>
+        <div class="small" style="margin-top:10px">La fricción τ_f se resta como torque adicional constante: W_pérdida = τ_f · θ. Los gráficos actualizan en tiempo real.</div>
       </div>
 
       <!-- Visual -->
       <div class="card svgwrap" style="flex-direction:column">
         <h3 style="margin:0 0 8px 0">Vista mecánica</h3>
-        <svg id="scene" width="420" height="360" viewBox="0 0 420 360"></svg>
+        <svg id="scene" width="500" height="420" viewBox="0 0 500 420"></svg>
         <div style="display:flex;gap:12px;align-items:center;margin-top:8px;width:100%;justify-content:space-between">
           <div class="small" id="tNow">Tiempo: 0.00 s</div>
           <div class="note">Ángulo manivela: <span id="angleDisplay">0.00</span> rad</div>
+        </div>
+
+        <div class="graph" style="width:100%;display:flex;gap:8px">
+          <canvas id="graphEnergy" width="320" height="120" style="border-radius:6px;background:#fafafa"></canvas>
+          <canvas id="graphHeight" width="320" height="120" style="border-radius:6px;background:#fafafa"></canvas>
         </div>
       </div>
 
@@ -78,185 +87,235 @@
       <div class="card">
         <h3 style="margin:0 0 6px 0">Resultados (física y energía)</h3>
         <div id="resultsGrid" class="results"></div>
-        <div style="margin-top:10px" class="small">Comprobación: W_in debe igualar (ΔK + ΔU + pérdidas). Esta versión asume <strong>sin pérdidas</strong> si el coeficiente de fricción es 0.</div>
+        <div style="margin-top:10px" class="small">Comprobación: W_in = ∫ τ_h ω dt, pérdidas = τ_f θ. Esta versión calcula todo numéricamente en pequeños pasos dt.</div>
       </div>
     </div>
 
-    <footer>Si quieres, después agrego fricción variable y gráficos (energía vs tiempo) — dime.</footer>
+    <footer>Si quieres exportar los datos (CSV) o descargar imágenes de los gráficos, lo agrego en la próxima actualización.</footer>
   </div>
 
   <script>
-    // --- Utilidades ---
-    function num(id){const v=parseFloat(document.getElementById(id).value);return isNaN(v)?0:v}
+    // Utils
+    const el = id => document.getElementById(id);
+    const num = id => { const v = parseFloat(el(id).value); return isNaN(v)?0:v };
 
-    // --- Física corregida ---
-    function computeAll({m,n,r,Lh,I,g,a,t}){
-      // Estática
-      const T1_static = (m * g) / n;                    // T = mg / n
-      const tau_static = T1_static * r;                 // τ = T r
-      const Fh_static = tau_static / Lh;                // F_h = τ / L_h
+    // Physics compute single-step closed forms (used for initial calc)
+    function nominalValues(params){
+      const {m,n,r,Lh,I,g,a} = params;
+      const T1_static = (m*g)/n;
+      const tau_static = T1_static * r;
+      const Fh_static = tau_static / Lh;
 
-      // Dinámica (ecuaciones correctas):
-      // n T1 - m g = m a  => T1 = m(g+a)/n
-      // τ_h - T1 r = I α  and α = n a / r
-      const T1_dyn = (m * (g + a)) / n;
-      const alpha = (n * a) / r; // α
-      const tau_dyn = I * alpha + T1_dyn * r; // τ_h = I α + T1 r
+      const T1_dyn = (m*(g+a))/n;
+      const alpha = (n*a)/r;
+      const tau_dyn = I*alpha + T1_dyn * r; // without friction
       const Fh_dyn = tau_dyn / Lh;
 
-      // Velocidades y desplazamientos
-      const v_after = a * t;                    // v = a t
-      const omega_after = (v_after * n) / r;    // ω = v n / r
-      const dh = 0.5 * a * t * t;               // Δh
-      const s_cuerda = n * dh;
-
-      // Energías con masa equivalente correcta
-      // K_cab = 1/2 m v^2
-      // K_tamb = 1/2 I ω^2 = 1/2 (I n^2 / r^2) v^2 => equivalente m_tamb = I n^2 / r^2
-      const K_cab = 0.5 * m * v_after * v_after;
-      const K_tamb = 0.5 * I * omega_after * omega_after;
-      const U = m * g * dh;
-
-      // Trabajo: θ = 0.5 α t^2, W_in = τ_h θ
-      const theta = 0.5 * alpha * t * t;
-      const W_in = tau_dyn * theta;
-      const W_out = U; // cambio en energía potencial
-
-      // Masa equivalente total (para energía cinética total expresada como 1/2 m_eq v^2)
-      const m_tamb_eq = I * (n * n) / (r * r); // I n^2 / r^2
-      const m_eq_total = m + m_tamb_eq;
-
-      return {
-        T1_static, tau_static, Fh_static,
-        T1_dyn, alpha, tau_dyn, Fh_dyn,
-        v_after, omega_after, dh, s_cuerda,
-        K_cab, K_tamb, U, theta, W_in, W_out,
-        m_tamb_eq, m_eq_total
-      };
+      return {T1_static,tau_static,Fh_static,T1_dyn,alpha,tau_dyn,Fh_dyn};
     }
 
-    // --- SVG drawing ---
+    // SVG scene params
     const svg = document.getElementById('scene');
-    const W = 420, H = 360;
-    const drumX = 80, drumY = 60; // tambor superior izquierdo
-    const manivelaX = 340, manivelaY = 220;
-    const cabinBaseY = 260; // y pixel when h=0
+    const W = 500, H = 420;
+    const drumX = 100, drumY = 80;
+    const manivelaX = 420, manivelaY = 260;
+    const cabinBaseY = 320; // pixel for h=0
     const scale = 60; // px per meter
 
-    function clearSVG(){while(svg.firstChild) svg.removeChild(svg.firstChild)}
+    function clearSVG(){ while(svg.firstChild) svg.removeChild(svg.firstChild); }
 
-    function drawScene(n, dh_now, results, angleManivela){
+    function drawScene(n, dh_now, simState){
       clearSVG();
-      // soporte superior central
-      const support = el('rect',{x:drumX-10,y:drumY-20,width:20,height:40,rx:3,fill:'#333'});svg.appendChild(support);
-      // tambor (drum)
-      svg.appendChild(el('circle',{cx:drumX,cy:drumY,r:22,stroke:'#444','stroke-width':4,fill:'#eee'}));
-      // tambor eje
-      svg.appendChild(el('rect',{x:drumX-4,y:drumY-26,width:8,height:52,fill:'#bbb'}));
+      // support
+      svg.appendChild(sv('rect',{x:drumX-12,y:drumY-24,width:24,height:48,rx:4,fill:'#333'}));
+      // drum
+      svg.appendChild(sv('circle',{cx:drumX,cy:drumY,r:26,stroke:'#444','stroke-width':4,fill:'#eee'}));
+      svg.appendChild(sv('rect',{x:drumX-6,y:drumY-30,width:12,height:60,fill:'#bbb'}));
 
-      // polea superior (distinta del tambor) para mostrar polipasto visualmente
-      const topPulleyX = drumX + 40; const topPulleyY = drumY;
-      svg.appendChild(el('circle',{cx:topPulleyX,cy:topPulleyY,r:16,stroke:'#666','stroke-width':3,fill:'#fafafa'}));
+      // top moving pulley (to illustrate polipasto)
+      const topPulleyX = drumX + 60, topPulleyY = drumY;
+      svg.appendChild(sv('circle',{cx:topPulleyX,cy:topPulleyY,r:18,stroke:'#666','stroke-width':3,fill:'#fafafa'}));
+      svg.appendChild(sv('circle',{cx:topPulleyX,cy:topPulleyY,r:6,fill:'#999'}));
 
-      // Dibujar manivela (en el lado derecho) con brazo giratorio
-      svg.appendChild(el('circle',{cx:manivelaX,cy:manivelaY,r:30,stroke:'#333','stroke-width':3,fill:'#fff'}));
-      // brazo manivela
-      const armLen = 42;
-      const armX = manivelaX + armLen * Math.cos(angleManivela);
-      const armY = manivelaY + armLen * Math.sin(angleManivela);
-      svg.appendChild(el('line',{x1:manivelaX,y1:manivelaY,x2:armX,y2:armY,stroke:'#111','stroke-width':4,'stroke-linecap':'round'}));
-      svg.appendChild(el('circle',{cx:armX,cy:armY,r:6,fill:'#111'}));
+      // manivela and handle
+      svg.appendChild(sv('circle',{cx:manivelaX,cy:manivelaY,r:36,stroke:'#333','stroke-width':3,fill:'#fff'}));
+      const armLen = 48;
+      const angle = simState.theta; // use θ as total angle
+      const armX = manivelaX + armLen * Math.cos(angle);
+      const armY = manivelaY + armLen * Math.sin(angle);
+      svg.appendChild(sv('line',{x1:manivelaX,y1:manivelaY,x2:armX,y2:armY,stroke:'#111','stroke-width':5,'stroke-linecap':'round'}));
+      svg.appendChild(sv('circle',{cx:armX,cy:armY,r:7,fill:'#111'}));
 
-      // Cables: representar n ramales que van desde topPulley hasta la cabina
-      const cabinYPixel = cabinBaseY - dh_now * scale;
+      // rope from drum to top pulley
+      svg.appendChild(sv('line',{x1:drumX+26,y1:drumY,x2:topPulleyX-18,y2:topPulleyY,stroke:'#222','stroke-width':2}));
+
+      // ramales from top pulley to cabina
+      const cabinYPixel = cabinBaseY - dh_now*scale;
       for(let i=0;i<n;i++){
-        const offset = (i - (n-1)/2) * 10;
-        // del tambor al topPulley (visual) - mostrar cuerda desde tambor hacia la polea superior
-        svg.appendChild(el('line',{x1:drumX+20,y1:drumY,x2:topPulleyX-16,y2:topPulleyY,stroke:'#222','stroke-width':2}));
-        // de polea superior a la cabina
-        svg.appendChild(el('line',{x1:topPulleyX+offset,y1:topPulleyY+12,x2:drumX+offset,y2:cabinYPixel-18,stroke:'#222','stroke-width':2}));
+        const offset = (i - (n-1)/2) * 12;
+        // show rope segment
+        const line = sv('line',{x1:topPulleyX+offset,y1:topPulleyY+18,x2:drumX+offset,y2:cabinYPixel-30,stroke:'#222','stroke-width':Math.min(6,1+simState.T1/400)});
+        svg.appendChild(line);
       }
 
-      // Cabina (rect)
-      svg.appendChild(el('rect',{x:drumX-40,y:cabinYPixel-30,width:160,height:60,rx:8,fill:'#f3f4f6',stroke:'#111'}));
-      svg.appendChild(el('text',{x:drumX+40,y:cabinYPixel, 'text-anchor':'middle', 'dominant-baseline':'middle','font-size':14, fill:'#111'}, 'Cabina'));
+      // cabin
+      svg.appendChild(sv('rect',{x:drumX-40,y:cabinYPixel-30,width:180,height:60,rx:10,fill:'#f3f4f6',stroke:'#111'}));
+      svg.appendChild(sv('text',{x:drumX+50,y:cabinYPixel, 'text-anchor':'middle','dominant-baseline':'middle','font-size':14,fill:'#111'}, 'Cabina'));
 
-      // Ground
-      svg.appendChild(el('line',{x1:0,y1:cabinBaseY+40,x2:W,y2:cabinBaseY+40,stroke:'#999','stroke-dasharray':'4 4'}));
+      // show tension numeric near cable
+      svg.appendChild(sv('text',{x:topPulleyX+80,y:drumY-10,'font-size':12,fill:'#111'}, `T1=${simState.T1.toFixed(1)} N`));
+      svg.appendChild(sv('text',{x:topPulleyX+80,y:drumY+8,'font-size':12,fill:'#111'}, `τ_f=${simState.tau_f.toFixed(2)} N·m`));
 
-      // Overlay numbers
-      svg.appendChild(el('text',{x:210,y:30,'font-size':13,fill:'#111'}, `v=${results.v_after.toFixed(3)} m/s`));
-      svg.appendChild(el('text',{x:210,y:50,'font-size':13,fill:'#111'}, `ω=${results.omega_after.toFixed(3)} rad/s`));
-      svg.appendChild(el('text',{x:210,y:70,'font-size':13,fill:'#111'}, `Δh=${results.dh.toFixed(3)} m`));
-      svg.appendChild(el('text',{x:210,y:90,'font-size':13,fill:'#111'}, `m_eq tambor = ${results.m_tamb_eq.toFixed(2)} kg`));
+      // ground
+      svg.appendChild(sv('line',{x1:0,y1:cabinBaseY+48,x2:W,y2:cabinBaseY+48,stroke:'#999','stroke-dasharray':'4 4'}));
     }
 
-    function el(tag, attrs, txt){ const e = document.createElementNS('http://www.w3.org/2000/svg', tag); if(attrs) for(const k in attrs) e.setAttribute(k, attrs[k]); if(txt) e.textContent = txt; return e; }
+    function sv(tag, attrs, txt){ const n = document.createElementNS('http://www.w3.org/2000/svg', tag); if(attrs) for(const k in attrs) n.setAttribute(k, attrs[k]); if(txt) n.textContent = txt; return n }
 
-    // --- Simulación ---
-    let raf=null; let start=null; let running=false; let simParams=null; let simResults=null;
-
-    function startSim(){
-      if(running) return; // evitar duplicados
-      const params = {
-        m: num('m'), n: Math.max(1, Math.floor(num('n'))), r: num('r'), Lh: num('Lh'), I: num('I'), g: num('g'), a: num('a'), t: num('tSim')
-      };
-      simParams = params;
-      simResults = computeAll(params);
-      running = true; start = null; cancelAnimationFrame(raf); raf = requestAnimationFrame(loop);
+    // Graph utilities (simple plot on canvas)
+    function plotCanvas(ctx, dataX, dataY, opts){
+      const w = ctx.canvas.width, h = ctx.canvas.height; ctx.clearRect(0,0,w,h);
+      // axes
+      ctx.strokeStyle='#ddd'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(40,8); ctx.lineTo(40,h-18); ctx.lineTo(w-8,h-18); ctx.stroke();
+      // labels
+      ctx.fillStyle='#666'; ctx.font='11px Arial'; ctx.fillText(opts.yLabel||'',8,18); ctx.fillText('t (s)',w-40,h-6);
+      // map data
+      const xmin = 0, xmax = Math.max(1, dataX[dataX.length-1]||1);
+      const ymin = Math.min(...dataY), ymax = Math.max(...dataY);
+      const pad = 8; const plotW = w-56, plotH = h-36;
+      // y ticks
+      ctx.fillStyle='#999'; ctx.font='10px Arial'; ctx.fillText(ymin.toFixed(1),6,h-20); ctx.fillText(ymax.toFixed(1),6,16);
+      // polyline
+      ctx.strokeStyle = opts.color || '#0b63d6'; ctx.lineWidth=2; ctx.beginPath();
+      for(let i=0;i<dataX.length;i++){ const x = 40 + (dataX[i]-xmin)/(xmax-xmin+1e-9)*plotW; const y = 8 + (1-(dataY[i]-ymin)/(ymax-ymin+1e-9))*plotH; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }
+      ctx.stroke();
     }
 
-    function resetSim(){ running=false; cancelAnimationFrame(raf); start=null; simParams=null; simResults=null; document.getElementById('tNow').textContent='Tiempo: 0.00 s'; document.getElementById('angleDisplay').textContent='0.00'; const r0 = Math.max(1, Math.floor(num('n'))); drawScene(r0,0,computeAll({m:num('m'),n:r0,r:num('r'),Lh:num('Lh'),I:num('I'),g:num('g'),a:num('a'),t:num('tSim')}),0); renderResults(computeAll({m:num('m'),n:r0,r:num('r'),Lh:num('Lh'),I:num('I'),g:num('g'),a:num('a'),t:num('tSim')})); }
+    // --- Simulation numeric integrator (constant requested acceleration a, compute required τ_h including τ_f)
+    let raf=null; let start=0; let running=false; let paused=false;
+    let simData = {time:[], energyIn:[], energyK:[], energyU:[], height:[], T1:[]};
 
-    function loop(ts){ if(!start) start = ts; const elapsed=(ts-start)/1000; const tNow = Math.min(elapsed, simParams.t); document.getElementById('tNow').textContent = 'Tiempo: ' + tNow.toFixed(2) + ' s';
-      // Cinemática: dh = 0.5 a t^2
-      const dh_now = 0.5 * simParams.a * tNow * tNow;
-      // ángulo manivela: θ(t) = 0.5 α t^2  where α = n a / r
-      const alpha = (simParams.n * simParams.a) / simParams.r;
-      const theta_now = 0.5 * alpha * tNow * tNow;
-      document.getElementById('angleDisplay').textContent = theta_now.toFixed(3);
-      // dibujar
-      drawScene(simParams.n, dh_now, simResults, theta_now);
-      if(elapsed < simParams.t) raf = requestAnimationFrame(loop); else { running=false; cancelAnimationFrame(raf); renderResults(simResults); }
+    function simulateStart(){ if(running) return; paused=false; running=true; simData = {time:[], energyIn:[], energyK:[], energyU:[], height:[], T1:[]}; start = null; cancelAnimationFrame(raf); raf = requestAnimationFrame(step); }
+    function simulatePause(){ paused = !paused; }
+    function simulateReset(){ running=false; paused=false; cancelAnimationFrame(raf); start=null; simData = {time:[], energyIn:[], energyK:[], energyU:[], height:[], T1:[]}; renderInitial(); }
+
+    function step(ts){
+      if(!start) start = ts; if(paused){ raf = requestAnimationFrame(step); return; }
+      const elapsed = (ts-start)/1000; const params = {m:num('m'), n: Math.max(1,Math.floor(num('n'))), r:num('r'), Lh:num('Lh'), I:num('I'), g:num('g'), a:num('a'), t:num('tSim'), tau_f:num('tau_f')};
+      const tEnd = params.t;
+      // analytic kinematics assuming constant acceleration a
+      const tNow = Math.min(elapsed, tEnd);
+      const dh = 0.5 * params.a * tNow * tNow; // m
+      const v = params.a * tNow; // m/s
+      const omega = (v * params.n) / params.r; // rad/s
+      const alpha = (params.n * params.a) / params.r; // rad/s^2
+      const theta = 0.5 * alpha * tNow * tNow; // rad
+
+      // tensions and torques
+      const T1 = (params.m * (params.g + params.a)) / params.n; // N
+      const tau_needed = params.I * alpha + T1 * params.r; // without friction
+      const tau_h = tau_needed + params.tau_f; // human torque must overcome friction too
+
+      // Energies: integrate numerically using instantaneous power P = τ_h * ω
+      // We'll approximate dW = τ_h * ω * dt, but here we can compute accumulated analytically since α constant
+      // Simpler: record instantaneous quantities and do trapezoid integration externally.
+
+      // record
+      simData.time.push(tNow);
+      // instantaneous energies
+      const K_cab = 0.5 * params.m * v * v;
+      const K_tamb = 0.5 * params.I * omega * omega;
+      const U = params.m * params.g * dh;
+      simData.energyK.push(K_cab + K_tamb);
+      simData.energyU.push(U);
+      // approximate W_in by numerical integration of τ_h*ω
+      const lastIndex = simData.time.length - 1;
+      if(lastIndex === 0){ simData.energyIn.push(tau_h * omega * 0 * 0 + 0); } else {
+        // trapezoid from previous step
+        const dt = simData.time[lastIndex] - simData.time[lastIndex-1];
+        // previous τ_h and ω approximated from previous recorded values
+        // compute prev values
+        const tPrev = simData.time[lastIndex-1];
+        const vPrev = params.a * tPrev; const omegaPrev = (vPrev * params.n) / params.r; const alphaPrev = alpha; const thetaPrev = 0.5 * alphaPrev * tPrev * tPrev;
+        const T1Prev = (params.m * (params.g + params.a)) / params.n;
+        const tauNeededPrev = params.I * alphaPrev + T1Prev * params.r; const tau_hPrev = tauNeededPrev + params.tau_f;
+        const Pprev = tau_hPrev * omegaPrev; const Pnow = tau_h * omega;
+        const Wprev = simData.energyIn[lastIndex-1] || 0;
+        simData.energyIn.push(Wprev + 0.5 * (Pprev + Pnow) * dt);
+      }
+
+      simData.height.push(dh);
+      simData.T1.push(T1);
+
+      // update UI numbers
+      el('tNow').textContent = 'Tiempo: ' + tNow.toFixed(2) + ' s';
+
+      // draw scene
+      const simState = {T1: T1, tau_f: params.tau_f, theta: theta};
+      drawScene(params.n, dh, simState);
+      el('angleDisplay').textContent = theta.toFixed(3);
+
+      // update graphs
+      drawGraphs(simData);
+
+      if(elapsed < tEnd){ raf = requestAnimationFrame(step); } else { running=false; cancelAnimationFrame(raf); renderFinalResults(params, simData); }
     }
 
-    // --- Mostrar resultados en la UI ---
-    function renderResults(r){
-      const grid = document.getElementById('resultsGrid'); grid.innerHTML='';
+    function drawGraphs(data){
+      const ctxE = document.getElementById('graphEnergy').getContext('2d');
+      const ctxH = document.getElementById('graphHeight').getContext('2d');
+      // Energy plot: energyIn vs time; K and U stacked? We'll plot three lines: W_in, K_total, U
+      const times = data.time;
+      const Wins = data.energyIn;
+      const Ktot = data.energyK;
+      const U = data.energyU;
+      if(times.length < 2){ ctxE.clearRect(0,0,320,120); ctxH.clearRect(0,0,320,120); return; }
+      plotCanvas(ctxE, times, Wins, {yLabel:'W_in (J)', color:'#0b63d6'});
+      // overlay K
+      overlayLine(ctxE, times, Ktot, '#16a34a');
+      overlayLine(ctxE, times, U, '#f59e0b');
+      plotCanvas(ctxH, times, data.height, {yLabel:'h (m)', color:'#0b63d6'});
+    }
+
+    function overlayLine(ctx, dataX, dataY, color){ const w = ctx.canvas.width, h = ctx.canvas.height; const xmin=0, xmax=Math.max(1,dataX[dataX.length-1]); const ymin=Math.min(...dataY), ymax=Math.max(...dataY); const plotW=w-56, plotH=h-36; ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath(); for(let i=0;i<dataX.length;i++){ const x = 40 + (dataX[i]-xmin)/(xmax-xmin+1e-9)*plotW; const y = 8 + (1-(dataY[i]-ymin)/(ymax-ymin+1e-9))*plotH; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);} ctx.stroke(); }
+
+    // final results (numeric)
+    function renderFinalResults(params, data){
+      // take last values
+      const idx = data.time.length - 1;
+      const W_in = data.energyIn[idx] || 0;
+      const Ktot = data.energyK[idx] || 0;
+      const U = data.energyU[idx] || 0;
+      const lastT1 = data.T1[idx] || 0;
+      const theta = 0.5 * ((params.n * params.a)/params.r) * params.t * params.t;
+      const W_loss = params.tau_f * theta;
+
+      const grid = el('resultsGrid'); grid.innerHTML = '';
       const rows = [
-        ['Tensión (estática) T₁', r.T1_static.toFixed(2)+' N'],
-        ['Torque (estático) τ', r.tau_static.toFixed(2)+' N·m'],
-        ['Fuerza humana (estática) F_h', r.Fh_static.toFixed(2)+' N'],
-
-        ['Tensión (dinámica) T₁', r.T1_dyn.toFixed(2)+' N'],
-        ['α (rad/s²)', r.alpha.toFixed(3)+' rad/s²'],
-        ['Torque (dinámico) τ', r.tau_dyn.toFixed(2)+' N·m'],
-        ['Fuerza humana (dinámica) F_h', r.Fh_dyn.toFixed(2)+' N'],
-
-        ['Vel. final v', r.v_after.toFixed(3)+' m/s'],
-        ['Vel. ang. ω', r.omega_after.toFixed(3)+' rad/s'],
-
-        ['K cabina', r.K_cab.toFixed(2)+' J'],
-        ['K tambor', r.K_tamb.toFixed(2)+' J'],
-        ['ΔU (potencial)', r.U.toFixed(2)+' J'],
-
-        ['Trabajo W_in', r.W_in.toFixed(2)+' J'],
-        ['Trabajo útil W_out (ΔU)', r.W_out.toFixed(2)+' J']
+        ['Tensión final T₁', lastT1.toFixed(2)+' N'],
+        ['Trabajo total W_in', W_in.toFixed(2)+' J'],
+        ['Trabajo perdido (fricción) W_loss', W_loss.toFixed(2)+' J'],
+        ['Energía cinética total', Ktot.toFixed(2)+' J'],
+        ['Energía potencial ΔU', U.toFixed(2)+' J'],
+        ['Comprobación: W_in ?= K + U + pérdidas', `${W_in.toFixed(2)} ≈ ${(Ktot+U+W_loss).toFixed(2)} J`]
       ];
-      for(const [k,v] of rows){ const d = document.createElement('div'); d.className='result'; d.innerHTML = `<div style="font-size:12px;color:#666">${k}</div><div style="margin-top:6px">${v}</div>`; grid.appendChild(d);} 
-      const check = document.createElement('div'); check.className='result'; check.style.gridColumn='1 / -1'; check.innerHTML = `<div style="font-size:12px;color:#666">Comprobación (W_in ?= K_cab + K_tamb + ΔU)</div><div style="margin-top:6px">W_in = ${r.W_in.toFixed(2)} J • (K+U) = ${(r.K_cab + r.K_tamb + r.U).toFixed(2)} J</div>`; grid.appendChild(check);
-      const meq = document.createElement('div'); meq.className='result'; meq.style.gridColumn='1 / -1'; meq.innerHTML = `<div style="font-size:12px;color:#666">Masa equivalente del tambor</div><div style="margin-top:6px">m_tamb_eq = I·n² / r² = ${r.m_tamb_eq.toFixed(3)} kg — m_eq total = ${r.m_eq_total.toFixed(3)} kg</div>`; grid.appendChild(meq);
+      for(const [k,v] of rows){ const d=document.createElement('div'); d.className='result'; d.innerHTML = `<div style="font-size:12px;color:#666">${k}</div><div style="margin-top:6px">${v}</div>`; grid.appendChild(d);} 
     }
 
-    // wire buttons
-    document.getElementById('btnSim').addEventListener('click', ()=>{ startSim(); });
-    document.getElementById('btnReset').addEventListener('click', ()=>{ resetSim(); });
+    // helper initial render
+    function renderInitial(){ const params = {m:num('m'), n: Math.max(1,Math.floor(num('n'))), r:num('r'), Lh:num('Lh'), I:num('I'), g:num('g'), a:num('a'), t:num('tSim')}; const nominal = nominalValues(params);
+      const simState = {T1: nominal.T1_dyn, tau_f: num('tau_f'), theta:0}; drawScene(params.n, 0, simState); drawGraphs({time:[],energyIn:[],energyK:[],energyU:[],height:[]}); renderTempResults(nominal);
+    }
 
-    // inicial
-    resetSim();
+    function renderTempResults(nominal){ const grid = el('resultsGrid'); grid.innerHTML=''; const rows = [ ['Tensión (estática) T₁', nominal.T1_static.toFixed(2)+' N'], ['Torque (estático) τ', nominal.tau_static.toFixed(2)+' N·m'], ['Fuerza humana (estática) F_h', nominal.Fh_static.toFixed(2)+' N'], ['Tensión (dinámica) T₁', nominal.T1_dyn.toFixed(2)+' N'], ['α (rad/s²)', nominal.alpha.toFixed(3)+' rad/s²'], ['Torque (sin fricción) τ (dinámico)', nominal.tau_dyn.toFixed(2)+' N·m'] ]; for(const [k,v] of rows){ const d=document.createElement('div'); d.className='result'; d.innerHTML = `<div style="font-size:12px;color:#666">${k}</div><div style="margin-top:6px">${v}</div>`; grid.appendChild(d);} }
 
-    // actualizar resultados cuando cambien inputs (si no está corriendo)
-    const ids = ['m','n','r','Lh','I','g','a','tSim']; ids.forEach(id=>document.getElementById(id).addEventListener('input', ()=>{ if(!running) renderResults(computeAll({m:num('m'),n:Math.max(1,Math.floor(num('n'))),r:num('r'),Lh:num('Lh'),I:num('I'),g:num('g'),a:num('a'),t:num('tSim')})); }));
+    // buttons
+    el('btnSim').addEventListener('click', ()=> simulateStart());
+    el('btnPause').addEventListener('click', ()=> { simulatePause(); el('btnPause').textContent = el('btnPause').textContent === 'Pausa' ? 'Continuar' : 'Pausa'; });
+    el('btnReset').addEventListener('click', ()=> { simulateReset(); });
+
+    // init
+    renderInitial();
 
   </script>
 </body>
